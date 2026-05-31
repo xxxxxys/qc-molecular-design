@@ -190,29 +190,46 @@ class MolecularDesigner:
         # ── Pre-build QUBO structure ─────────────────────────────────────
         qubo    = MoleculeQUBO(atom_symbols, max_valencies)
         y_star  = _make_target_y(prop, t_range)
-        surrogate = LinearRegression()
+        # fit_intercept=False: paper surrogate is Σβ_{ij}A_{ij}, no constant term
+        surrogate = LinearRegression(fit_intercept=False)
         bond_X: List[np.ndarray] = []
         fe_y:   List[float]      = []
         generated: List[Dict]    = []
+        # Global bond-vector hash set for cross-step deduplication.
+        # Duplicate (bond_vec, energy) pairs in the surrogate dataset are
+        # equivalent to upweighting already-visited molecules, biasing β.
+        seen_bvec: set = set()
+        seen_smi_global: set = set()
 
         # ── Inner: solve QUBO, evaluate, collect ─────────────────────────
         def _step(beta: Optional[np.ndarray], phase: str) -> int:
-            Q        = qubo.build(beta, lam)
+            # Adaptive penalty: keep λ ≥ 10 × max|β| so valency constraints
+            # always dominate the surrogate objective regardless of β scale.
+            if beta is not None and len(beta) > 0:
+                eff_lam = max(lam, 10.0 * float(np.abs(beta).max()) + 1e-8)
+            else:
+                eff_lam = lam
+
+            Q        = qubo.build(beta, eff_lam)
             samples  = solve_qubo(Q, sa_r, sa_s)
             valid    = 0
-            seen_smi = set()
             for sample in samples[:20]:           # check up to 20 candidates
                 adj  = qubo.decode_sample(sample)
                 smi  = adj_to_smiles(atom_symbols, adj)
-                if smi is None or smi in seen_smi:
+                if smi is None or smi in seen_smi_global:
                     continue
-                seen_smi.add(smi)
+                seen_smi_global.add(smi)
 
                 fp   = self._fingerprint(atom_symbols, adj)
                 fe   = self._free_energy(fp, y_star)
                 bvec = qubo.bond_vector(adj)
-                bond_X.append(bvec)
-                fe_y.append(fe)
+
+                # Only append unique bond vectors to the surrogate dataset
+                bvec_key = bvec.tobytes()
+                if bvec_key not in seen_bvec:
+                    seen_bvec.add(bvec_key)
+                    bond_X.append(bvec)
+                    fe_y.append(fe)
 
                 props = compute_rdkit_props(smi)
                 if props:
