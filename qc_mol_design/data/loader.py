@@ -82,9 +82,12 @@ def load_zinc12k(path: Optional[str] = None) -> pd.DataFrame:
         )
 
     df = pd.read_csv(csv_path)
-    df.columns = [c.lower().strip() for c in df.columns]
 
-    # Retain training split when a split column is present
+    # Normalise column names: lowercase + strip whitespace
+    df.columns = [c.lower().strip() for c in df.columns]
+    # zinc250k uses 'logp' (from 'logP') and 'sas' (from 'SAS') after lower()
+
+    # Retain training split when a legacy split column is present
     if "type" in df.columns:
         df = df[df["type"] == "train"].reset_index(drop=True)
 
@@ -94,6 +97,9 @@ def load_zinc12k(path: Optional[str] = None) -> pd.DataFrame:
     )
     if smiles_col != "smiles":
         df = df.rename(columns={smiles_col: "smiles"})
+
+    # Strip trailing whitespace / newlines from SMILES
+    df["smiles"] = df["smiles"].astype(str).str.strip()
 
     # Check for pre-computed property columns
     required_props = {"qed", "logp", "sas"}

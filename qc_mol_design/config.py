@@ -38,7 +38,7 @@ class Config:
     seed: int = 42
 
     # ── Data ──────────────────────────────────────────────────────────────
-    data_path: str = "all_gen_mols.csv"
+    data_path: str = "zinc250k.csv"
     n_train:   int = 10_000
     n_valid:   int = 1_000
     n_test:    int = 1_000
